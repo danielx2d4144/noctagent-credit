@@ -34,6 +34,11 @@ export class RegistryConnectionError extends Error {
   }
 }
 
+/** CIS-8 contract reject for "no registration for this key". */
+export function isUnknownKeyReject(e: unknown): boolean {
+  return e instanceof RegistryToolError && e.tool === "owner_of_key" && /-7102\b/.test(e.message);
+}
+
 type ToolContent = { type: string; text?: string }[];
 
 /**
@@ -138,8 +143,14 @@ export class McpRegistryClient implements RegistryClient {
     return this.call<VerifyAgentCardResult>("verify_agent_card", { token_id: tokenId, fetch: true });
   }
 
-  ownerOfKey(key: ExternalKey) {
-    return this.call<KeyRegistration | null>("owner_of_key", { external_key: key });
+  /** Returns null for an unregistered key (the live server rejects with -7102 instead of returning null). */
+  async ownerOfKey(key: ExternalKey) {
+    try {
+      return await this.call<KeyRegistration | null>("owner_of_key", { external_key: key });
+    } catch (e) {
+      if (isUnknownKeyReject(e)) return null;
+      throw e;
+    }
   }
 
   /** Off-chain decode; this tool takes no `network` argument. */
