@@ -162,9 +162,13 @@ export async function checkCredit(
       result.findings.ownerAccount = rec.owner_account;
       if (!tr.tokenAddress) tr.tokenAddress = rec.token_address;
       if (rec.external_reference?.kind === "Cis8" && rec.external_reference.key) externalRefKey = rec.external_reference.key;
-      // agent_of status is authoritative on-chain; reconcile if is_active failed
-      if (result.findings.registryStatus === "unknown") {
-        result.findings.registryStatus = rec.status === "Active" ? "active" : rec.status === "Revoked" ? "revoked" : "unknown";
+      // Reconcile with is_active. Revocation wins any disagreement (fail closed); otherwise
+      // agent_of fills in when is_active failed or was inconclusive.
+      if (rec.status === "Revoked") {
+        if (result.findings.registryStatus === "active") errors.push("is_active and agent_of disagree; treating agent as revoked");
+        result.findings.registryStatus = "revoked";
+      } else if (result.findings.registryStatus === "unknown" && rec.status === "Active") {
+        result.findings.registryStatus = "active";
       }
     }
   } catch (e) {
@@ -257,7 +261,10 @@ export async function checkCredit(
   }
 
   result.decision = "approve";
-  result.reason = "registered, active agent with verified card and available line";
+  result.reason =
+    result.findings.agentCardHash === "match"
+      ? "registered, active agent with verified card and available line"
+      : "registered, active agent with available line (Agent Card unverified; allowed by policy)";
   result.approvedLimit = Math.min(requestedAmount, view.remaining);
   return result;
 }
